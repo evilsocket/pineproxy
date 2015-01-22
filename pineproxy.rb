@@ -14,29 +14,45 @@ This project is released under the GPL 3 license.
 require 'socket'
 require 'uri'
 require 'colorize'
+require 'optparse'
 
 module PineProxy
 
+    VERSION = '1.0.0'
+
 class Logger
+    LEVEL_DEBUG = 3
+    LEVEL_INFO  = 2
+    LEVEL_WARN  = 1
+    LEVEL_ERROR = 0
+
+    @@level = LEVEL_INFO
+
+    def Logger.set_verbosity(level)
+        raise "Invalid verbosity level" unless level >= 0 and level <= LEVEL_DEBUG
+
+        @@level = level
+    end
+
     def Logger.error(message)
-        log formatted_message(message, "ERR").red
+        log LEVEL_ERROR, formatted_message(message, "ERR").red
     end
 
     def Logger.warn(message)
-        log formatted_message(message, "WAR").yellow
+        log LEVEL_WARN, formatted_message(message, "WAR").yellow
     end
 
     def Logger.info(message)
-        log formatted_message(message, "INF")
+        log LEVEL_INFO, formatted_message(message, "INF")
     end
 
     def Logger.debug(message)
-        # log formatted_message(message, "DBG").light_black
+        log LEVEL_DEBUG, formatted_message(message, "DBG").light_black
     end
 
     private
-    def Logger.log(message)
-        puts message
+    def Logger.log( level, message )
+        puts message unless level > @@level
     end
 
     def Logger.formatted_message(message, message_type)
@@ -178,8 +194,10 @@ class Proxy
     end
 
     def stop
-        @socket.close
-        @running = false
+        if @socket and @running
+            @socket.close
+            @running = false
+        end
     end
 
     private
@@ -352,7 +370,36 @@ end
 
 end
 
-proxy = PineProxy::Proxy.new( '0.0.0.0', 8080 ) do |request,response|
+puts "--------------------------------------------"
+puts "PineProxy v#{PineProxy::VERSION}"
+puts "Copyleft by Simone 'evilsocket' Margaritelli"
+puts "--------------------------------------------\n\n"
+
+options = {
+    :address   => '0.0.0.0',
+    :port      => 8080,
+    :verbosity => PineProxy::Logger::LEVEL_INFO
+}
+
+OptionParser.new do |opts|
+    opts.banner = "Usage: #{$0} [options]"
+
+    opts.on( "-A", "--address ADDRESS", "Address to listen on - default: #{options[:address]}" ) do |v|
+        options[:address] = v
+    end
+
+    opts.on( "-P", "--port PORT", "Port to listen on - default: #{options[:port]}" ) do |v|
+        options[:port] = v.to_i
+    end
+
+    opts.on( "-V", "--verbosity LEVEL", "Verbosity level between #{PineProxy::Logger::LEVEL_DEBUG} and #{PineProxy::Logger::LEVEL_ERROR} - default: #{options[:verbosity]}" ) do |v|
+        options[:verbosity] = v.to_i
+    end
+end.parse!
+
+PineProxy::Logger.set_verbosity options[:verbosity]
+
+proxy = PineProxy::Proxy.new( options[:address], options[:port] ) do |request,response|
     # is an html page?
     if response.content_type == "text/html"
         # do your injection here
