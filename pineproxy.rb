@@ -256,6 +256,17 @@ class Proxy
         @main_thread = nil
         @running     = false
         @processor   = processor
+        @local_ips   = []
+
+        begin
+            @local_ips = Socket.ip_address_list.collect { |x| x.ip_address }
+        rescue
+            `ifconfig | grep inet`.split("\n").each do |line|
+                if line =~ /inet [adr:]*([\d\.]+)/
+                    @local_ips << $1
+                end
+            end
+        end
     end
 
     def start
@@ -364,7 +375,7 @@ class Proxy
 
         if Logger.colorize?
             verb_s = verb_s.light_blue
-            
+
             if response.code[0] == '2'
                 response_s += " [#{response.code}]".green
             elsif response.code[0] == '3'
@@ -384,13 +395,7 @@ class Proxy
     end
 
     def is_self_request? request
-        req_ip = IPSocket.getaddress(request.host)
-        Socket.ip_address_list.each do |ip|
-            if ip.ip_address == req_ip
-                return true
-            end
-        end
-        false
+        @local_ips.include? IPSocket.getaddress(request.host)
     end
 
     def rickroll_lamer client
