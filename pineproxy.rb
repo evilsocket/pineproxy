@@ -13,8 +13,15 @@ This project is released under the GPL 3 license.
 =end
 require 'socket'
 require 'uri'
-require 'colorize'
 require 'optparse'
+
+begin
+    require 'colorize'
+
+    HAVE_COLORIZE = true
+rescue LoadError
+    HAVE_COLORIZE = false
+end
 
 module PineProxy
 
@@ -26,7 +33,22 @@ class Logger
     LEVEL_WARN  = 1
     LEVEL_ERROR = 0
 
-    @@level = LEVEL_INFO
+    LEVEL_LABELS = {
+        LEVEL_DEBUG => 'DBG',
+        LEVEL_INFO  => 'INF',
+        LEVEL_WARN  => 'WAR',
+        LEVEL_ERROR => 'ERR'
+    }
+
+    LEVEL_COLORS = {
+        LEVEL_DEBUG => :light_black,
+        LEVEL_INFO  => nil,
+        LEVEL_WARN  => :yellow,
+        LEVEL_ERROR => :red
+    }
+
+    @@level   = LEVEL_INFO
+    @@logfile = nil
 
     def self.set_verbosity(level)
         raise "Invalid verbosity level" unless level >= 0 and level <= LEVEL_DEBUG
@@ -34,29 +56,54 @@ class Logger
         @@level = level
     end
 
+    def self.set_logfile(filename)
+        @@logfile = filename
+    end
+
+    def self.colorize?
+        @@logfile.nil? and HAVE_COLORIZE
+    end
+
     def self.error(message)
-        log LEVEL_ERROR, formatted_message(message, "ERR").red
+        log formatted_message( LEVEL_ERROR, message )
     end
 
     def self.warn(message)
-        log LEVEL_WARN, formatted_message(message, "WAR").yellow
+        log formatted_message( LEVEL_WARN, message )
     end
 
     def self.info(message)
-        log LEVEL_INFO, formatted_message(message, "INF")
+        log formatted_message( LEVEL_INFO, message )
     end
 
     def self.debug(message)
-        log LEVEL_DEBUG, formatted_message(message, "DBG").light_black
+        log formatted_message( LEVEL_DEBUG, message )
     end
 
     private
-    def self.log( level, message )
-        puts message unless level > @@level
+    def self.log( message )
+        return unless message
+
+        if @@logfile.nil?
+            puts message
+        elsif level <= @@level
+            open( @@logfile, 'a+t' ) do |f|
+                f << "#{message}\n"
+            end
+        end
     end
 
-    def self.formatted_message(message, message_type)
-        "[#{Time.now}] [#{message_type}] #{message}"
+    def self.formatted_message(level, message)
+        return nil unless level <= @@level
+
+        formatted = "[#{Time.now}] [#{LEVEL_LABELS[level]}] #{message}"
+
+        # do not colorize if we're loggin to a file
+        if self.colorize? and LEVEL_COLORS[level]
+            formatted = formatted.colorize LEVEL_COLORS[level]
+        end
+
+        formatted
     end
 end
 
@@ -299,14 +346,18 @@ class Proxy
         response_s = "( #{response.content_type} )"
         request_s  = request_s.slice(0..50) + "..." unless request_s.length <= 50
 
-        if response.code[0] == '2'
-            response_s += " [#{response.code}]".green
-        elsif response.code[0] == '3'
-            response_s += " [#{response.code}]".light_black
-        elsif response.code[0] == '4'
-            response_s += " [#{response.code}]".yellow
-        elsif response.code[0] == '5'
-            response_s += " [#{response.code}]".red
+        if Logger.colorize?
+            if response.code[0] == '2'
+                response_s += " [#{response.code}]".green
+            elsif response.code[0] == '3'
+                response_s += " [#{response.code}]".light_black
+            elsif response.code[0] == '4'
+                response_s += " [#{response.code}]".yellow
+            elsif response.code[0] == '5'
+                response_s += " [#{response.code}]".red
+            else
+                response_s += " [#{response.code}]"
+            end
         else
             response_s += " [#{response.code}]"
         end
@@ -397,7 +448,8 @@ options = {
     :address   => '0.0.0.0',
     :port      => 8080,
     :modules   => File.expand_path( File.dirname(__FILE__) + '/modules' ),
-    :verbosity => PineProxy::Logger::LEVEL_INFO
+    :verbosity => PineProxy::Logger::LEVEL_INFO,
+    :logfile   => nil
 }
 
 OptionParser.new do |opts|
@@ -418,12 +470,17 @@ OptionParser.new do |opts|
     opts.on( "-V", "--verbosity LEVEL", "Verbosity level between #{PineProxy::Logger::LEVEL_DEBUG} and #{PineProxy::Logger::LEVEL_ERROR} - default: #{options[:verbosity]}" ) do |v|
         options[:verbosity] = v.to_i
     end
+
+    opts.on( "-L", "--logfile FILE", "Log on this file instead of the stdout." ) do |v|
+        options[:logfile] = v
+    end
 end.parse!
 
 # load modules from the given path
 Dir["#{options[:modules]}/*.rb"].each { |f| require f }
 # setup the logger
 PineProxy::Logger.set_verbosity options[:verbosity]
+PineProxy::Logger.set_logfile options[:logfile]
 # register modules inside the system
 PineProxy::Module.register_modules
 
