@@ -357,12 +357,14 @@ class Proxy
 
     def log_stream client, request, response
         client_s   = "[#{client}]"
-        verb_s     = request.verb.light_blue
+        verb_s     = request.verb
         request_s  = "http://#{request.host}#{request.url}"
         response_s = "( #{response.content_type} )"
         request_s  = request_s.slice(0..50) + "..." unless request_s.length <= 50
 
         if Logger.colorize?
+            verb_s = verb_s.light_blue
+            
             if response.code[0] == '2'
                 response_s += " [#{response.code}]".green
             elsif response.code[0] == '3'
