@@ -381,6 +381,21 @@ class Proxy
         Logger.info "#{client_s} #{verb_s} #{request_s} #{response_s}"
     end
 
+    def is_self_request? request
+        req_ip = IPSocket.getaddress(request.host)
+        Socket.ip_address_list.each do |ip|
+            if ip.ip_address == req_ip
+                return true
+            end
+        end
+        false
+    end
+
+    def rickroll_lamer client
+        client.write "HTTP/1.1 302 Found\n"
+        client.write "Location: https://www.youtube.com/watch?v=dQw4w9WgXcQ\n\n"
+    end
+
     def client_thread client
         client_port, client_ip = Socket.unpack_sockaddr_in(client.getpeername)
         Logger.debug "New connection from #{client_ip}:#{client_port}"
@@ -403,45 +418,55 @@ class Proxy
 
             raise "Couldn't extract host from the request." unless request.host
 
-            server = TCPSocket.new( request.host, request.port )
+            # someone is having fun with us =)
+            if is_self_request? request
 
-            server.write request.to_s
+                Logger.warn "#{client_ip} is connecting to us directly."
 
-            # this is probably a POST request, collect incoming data
-            if request.content_length > 0
-                Logger.debug "Getting #{request.content_length} bytes from client"
+                rickroll_lamer client
 
-                binary_streaming client, server, :request => request
-            end
-
-            Logger.debug "Reading response ..."
-
-            response = Response.new
-
-            # read all response headers
-            loop do
-                line = server.readline
-
-                response << line
-
-                break unless not response.headers_done
-            end
-
-            if response.is_textual?
-                log_stream client_ip, request, response
-
-                Logger.debug "Detected textual response"
-
-                html_streaming request, response, server, client
             else
-                Logger.debug "[#{client_ip}] -> #{request.host}#{request.url} [#{response.code}]"
 
-                Logger.debug "Binary streaming"
+                server = TCPSocket.new( request.host, request.port )
 
-                binary_streaming server, client, :response => response
+                server.write request.to_s
+
+                # this is probably a POST request, collect incoming data
+                if request.content_length > 0
+                    Logger.debug "Getting #{request.content_length} bytes from client"
+
+                    binary_streaming client, server, :request => request
+                end
+
+                Logger.debug "Reading response ..."
+
+                response = Response.new
+
+                # read all response headers
+                loop do
+                    line = server.readline
+
+                    response << line
+
+                    break unless not response.headers_done
+                end
+
+                if response.is_textual?
+                    log_stream client_ip, request, response
+
+                    Logger.debug "Detected textual response"
+
+                    html_streaming request, response, server, client
+                else
+                    Logger.debug "[#{client_ip}] -> #{request.host}#{request.url} [#{response.code}]"
+
+                    Logger.debug "Binary streaming"
+
+                    binary_streaming server, client, :response => response
+                end
+
+                Logger.debug "#{client_ip}:#{client_port} served."
             end
-
-            Logger.debug "#{client_ip}:#{client_port} served."
 
         rescue Exception => e
             if request.host
