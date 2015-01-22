@@ -14,6 +14,7 @@ class HackTitle < PineProxy::Module
             url = url.slice(0..50) + "..." unless url.length <= 50
             PineProxy::Logger.warn "Hacking #{url} title tag"
 
+            # make sure to use sub! or gsub! to update the instance
             response.body.sub!( "<title>", "<title> !!! HACKED !!! " )
         end
     end
