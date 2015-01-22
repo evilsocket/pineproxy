@@ -18,7 +18,7 @@ require 'optparse'
 
 module PineProxy
 
-    VERSION = '1.0.0'
+VERSION = '1.0.0'
 
 class Logger
     LEVEL_DEBUG = 3
@@ -28,35 +28,53 @@ class Logger
 
     @@level = LEVEL_INFO
 
-    def Logger.set_verbosity(level)
+    def self.set_verbosity(level)
         raise "Invalid verbosity level" unless level >= 0 and level <= LEVEL_DEBUG
 
         @@level = level
     end
 
-    def Logger.error(message)
+    def self.error(message)
         log LEVEL_ERROR, formatted_message(message, "ERR").red
     end
 
-    def Logger.warn(message)
+    def self.warn(message)
         log LEVEL_WARN, formatted_message(message, "WAR").yellow
     end
 
-    def Logger.info(message)
+    def self.info(message)
         log LEVEL_INFO, formatted_message(message, "INF")
     end
 
-    def Logger.debug(message)
+    def self.debug(message)
         log LEVEL_DEBUG, formatted_message(message, "DBG").light_black
     end
 
     private
-    def Logger.log( level, message )
+    def self.log( level, message )
         puts message unless level > @@level
     end
 
-    def Logger.formatted_message(message, message_type)
+    def self.formatted_message(message, message_type)
         "[#{Time.now}] [#{message_type}] #{message}"
+    end
+end
+
+class Module
+    @@modules = []
+
+    def self.modules
+        @@modules
+    end
+
+    def self.register_modules
+        Object.constants.each do |klass|
+            const = Kernel.const_get(klass)
+            if const.respond_to?(:superclass) and const.superclass == self
+                Logger.debug "Registering module #{const}"
+                @@modules << const.new
+            end
+        end
     end
 end
 
@@ -378,6 +396,7 @@ puts "--------------------------------------------\n\n"
 options = {
     :address   => '0.0.0.0',
     :port      => 8080,
+    :modules   => File.expand_path( File.dirname(__FILE__) + '/modules' ),
     :verbosity => PineProxy::Logger::LEVEL_INFO
 }
 
@@ -392,27 +411,28 @@ OptionParser.new do |opts|
         options[:port] = v.to_i
     end
 
+    opts.on( "-M", "--modules PATH", "Path of modules to load - default: #{options[:modules]}" ) do |v|
+        options[:modules] = v
+    end
+
     opts.on( "-V", "--verbosity LEVEL", "Verbosity level between #{PineProxy::Logger::LEVEL_DEBUG} and #{PineProxy::Logger::LEVEL_ERROR} - default: #{options[:verbosity]}" ) do |v|
         options[:verbosity] = v.to_i
     end
 end.parse!
 
+# load modules from the given path
+Dir["#{options[:modules]}/*.rb"].each { |f| require f }
+# setup the logger
 PineProxy::Logger.set_verbosity options[:verbosity]
+# register modules inside the system
+PineProxy::Module.register_modules
 
 proxy = PineProxy::Proxy.new( options[:address], options[:port] ) do |request,response|
-    # is an html page?
-    if response.content_type == "text/html"
-        # do your injection here
-
-        # url = "http://#{request.host}#{request.url}"
-        # url = url.slice(0..50) + "..." unless url.length <= 50
-        # PineProxy::Logger.debug "! PATCHING #{url} !"
-
-        # if request.verb == 'POST'
-        #    puts request.to_s
-        #end
-
-        # response.body.sub( "<title>", "<title> !!! HACKED !!!" )
+    # loop each loaded module and execute if enabled
+    PineProxy::Module.modules.each do |mod|
+        if mod.is_enabled?
+            mod.on_request request, response
+        end
     end
 end
 
