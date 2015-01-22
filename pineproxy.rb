@@ -140,6 +140,7 @@ class Request
     def <<(line)
         line = line.chomp
 
+        # is this the first line '<VERB> <URI> HTTP/<VERSION>' ?
         if @url.nil? and line =~ /^(\w+)\s+(\S+)\s+HTTP\/[\d\.]+\s*$/
             @verb    = $1
             @url     = $2
@@ -152,6 +153,7 @@ class Request
 
             line = "#{@verb} #{url} HTTP/1.0"
 
+        # get the host header value
         elsif line =~ /^Host: (.*)$/
             @host = $1
             if host =~ /([^:]*):([0-9]*)$/
@@ -159,12 +161,15 @@ class Request
                 @port = $2.to_i
             end
 
+        # parse content length, this will speed up data streaming
         elsif line =~ /^Content-Length:\s+(\d+)\s*$/i
             @content_length = $1.to_i
 
+        # we don't want to have hundreds of threads running
         elsif line =~ /Connection: keep-alive/i
             line = "Connection: close"
 
+        # disable gzip, chunked, etc encodings
         elsif line =~ /^Accept-Encoding:.*/i
             line = "Accept-Encoding: identity"
 
@@ -196,18 +201,23 @@ class Response
     end
 
     def <<(line)
+        # we already parsed the heders, collect response body
         if @headers_done
             @body += line
         else
+            # parse the response status
             if @code.nil? and line =~ /^HTTP\/[\d\.]+\s+(.+)/
                 @code = $1.chomp
 
+            # parse the content type
             elsif line =~ /^Content-Type: ([^;]+).*/i
                 @content_type = $1.chomp
 
+            # parse content length
             elsif line =~ /^Content-Length:\s+(\d+)\s*$/i
                 @content_length = $1.to_i
 
+            # last line, we're done with the headers
             elsif line.chomp == ""
                 @headers_done = true
 
@@ -287,6 +297,8 @@ class Proxy
 
         total_size = 0
 
+        # if response|request object is available and a content length as well
+        # use it to speed up data streaming with precise data size
         if not opts[:response].nil?
             to.write opts[:response].to_s
 
@@ -309,16 +321,19 @@ class Proxy
             loop do
                 from.read chunk_size, buff
 
+                # nothing more to read?
                 break unless buff.size > 0
 
                 to.write buff
 
                 read += buff.size
 
+                # collect into the proper object
                 if not opts[:request].nil? and opts[:request].is_post?
                     opts[:request] << buff
                 end
 
+                # we've done reading?
                 break unless read != total_size
             end
         end
@@ -336,6 +351,7 @@ class Proxy
 
         @processor.call( request, response )
 
+        # Response::to_s will patch the headers if needed
         to.write response.to_s
     end
 
@@ -391,6 +407,7 @@ class Proxy
 
             server.write request.to_s
 
+            # this is probably a POST request, collect incoming data
             if request.content_length > 0
                 Logger.debug "Getting #{request.content_length} bytes from client"
 
@@ -401,6 +418,7 @@ class Proxy
 
             response = Response.new
 
+            # read all response headers
             loop do
                 line = server.readline
 
@@ -478,9 +496,11 @@ end.parse!
 
 # load modules from the given path
 Dir["#{options[:modules]}/*.rb"].each { |f| require f }
+
 # setup the logger
 PineProxy::Logger.set_verbosity options[:verbosity]
 PineProxy::Logger.set_logfile options[:logfile]
+
 # register modules inside the system
 PineProxy::Module.register_modules
 
