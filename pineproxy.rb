@@ -15,6 +15,9 @@ require 'socket'
 require 'uri'
 require 'optparse'
 
+Object.send :remove_const, :Config
+Config = RbConfig
+
 begin
     require 'colorize'
 
